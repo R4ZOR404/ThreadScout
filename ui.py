@@ -174,18 +174,21 @@ def show_results_table(results: list[dict]) -> None:
     )
 
     table.add_column("No", style=f"bold {COLORS['orange']}", width=4, justify="center")
-    table.add_column("Threads", style=f"bold {COLORS['white']}", width=16)
-    table.add_column("Instagram", style=f"bold {COLORS['pink']}", width=18)
-    table.add_column("Keyword", style=COLORS["orange"], width=14)
-    table.add_column("Content", style=COLORS["light_gray"], width=35)
+    table.add_column("Threads", style=f"bold {COLORS['white']}", width=14)
+    table.add_column("Instagram", style=f"bold {COLORS['pink']}", width=16)
+    table.add_column("IG Link", style=f"{COLORS['info']}", width=28)
+    table.add_column("Keyword", style=COLORS["orange"], width=12)
+    table.add_column("Content", style=COLORS["light_gray"], width=25)
 
     for i, row in enumerate(results[:50], start=1):  # Cap display at 50 rows
+        ig_link = str(row.get("Instagram Link", "Not Found"))
         table.add_row(
             str(i),
             str(row.get("Threads", "N/A")),
             str(row.get("Instagram", "Not Found")),
+            safe_truncate(ig_link, 28),
             str(row.get("Keyword", "")),
-            safe_truncate(str(row.get("Post Content", "")), 35),
+            safe_truncate(str(row.get("Post Content", "")), 25),
         )
 
     console.print()

@@ -10,7 +10,7 @@ from rich.theme import Theme
 # ─── App Metadata ───────────────────────────────────────────────────────────────
 
 APP_NAME: str = "ThreadScout"
-APP_VERSION: str = "1.0"
+APP_VERSION: str = "1.1"
 APP_TAGLINE: str = "Instagram Mutual Research Tool"
 
 # ─── Directory Paths ────────────────────────────────────────────────────────────
@@ -80,16 +80,21 @@ GRADIENT_COLORS: list[str] = [
 # ─── Browser Settings ───────────────────────────────────────────────────────────
 
 BROWSER_HEADLESS: bool = True
-BROWSER_TIMEOUT: int = 30000  # milliseconds
-SCROLL_COUNT: int = 5  # number of scroll-downs per keyword search
-SCROLL_DELAY: float = 2.0  # seconds between scrolls
-SEARCH_DELAY_MIN: float = 3.0  # minimum delay between keyword searches (seconds)
-SEARCH_DELAY_MAX: float = 6.0  # maximum delay between keyword searches (seconds)
+BROWSER_TIMEOUT: int = 15000  # milliseconds (reduced for speed)
+SCROLL_COUNT: int = 3  # number of scroll-downs per keyword search
+SCROLL_DELAY: float = 0.8  # seconds between scrolls (reduced for speed)
+SEARCH_DELAY_MIN: float = 0.5  # minimum delay between keyword searches (seconds)
+SEARCH_DELAY_MAX: float = 1.5  # maximum delay between keyword searches (seconds)
+CONCURRENT_TABS: int = 5  # number of browser tabs running in parallel
 
 # ─── Threads URLs ───────────────────────────────────────────────────────────────
 
 THREADS_BASE_URL: str = "https://www.threads.net"
 THREADS_SEARCH_URL: str = f"{THREADS_BASE_URL}/search?q="
+
+# ─── Instagram URL ──────────────────────────────────────────────────────────────
+
+INSTAGRAM_BASE_URL: str = "https://www.instagram.com"
 
 # ─── Filter Patterns ────────────────────────────────────────────────────────────
 

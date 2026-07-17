@@ -27,6 +27,7 @@ def _prepare_dataframe(results: list[dict]) -> pd.DataFrame:
     columns = [
         "Threads",
         "Instagram",
+        "Instagram Link",
         "Keyword",
         "Post URL",
         "Post Content",
@@ -207,10 +208,11 @@ def export_excel(results: list[dict], filepath: Path | None = None) -> bool:
                 column_widths = {
                     "A": 18,  # Threads
                     "B": 22,  # Instagram
-                    "C": 16,  # Keyword
-                    "D": 40,  # Post URL
-                    "E": 50,  # Post Content
-                    "F": 18,  # Date Scraped
+                    "C": 38,  # Instagram Link
+                    "D": 16,  # Keyword
+                    "E": 40,  # Post URL
+                    "F": 50,  # Post Content
+                    "G": 18,  # Date Scraped
                 }
 
                 for col_letter, width in column_widths.items():

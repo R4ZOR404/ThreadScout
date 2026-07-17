@@ -29,7 +29,7 @@
 
 ## 📋 Deskripsi
 
-**ThreadScout** adalah aplikasi terminal modern yang membantu pengguna mengumpulkan informasi dari posting Threads yang dapat diakses secara publik berdasarkan kata kunci tertentu, lalu mengekstrak username atau tautan Instagram yang dicantumkan oleh pembuat posting. Hasilnya disimpan ke format **CSV** dan **Excel** untuk keperluan riset, analisis komunitas, atau pengelolaan data.
+**ThreadScout** adalah aplikasi terminal modern yang membantu pengguna mengumpulkan informasi dari posting Threads yang dapat diakses secara publik berdasarkan kata kunci tertentu, lalu mengekstrak username dan **link profil Instagram** yang dicantumkan oleh pembuat posting. Hasilnya disimpan ke format **CSV** dan **Excel** untuk keperluan riset, analisis komunitas, atau pengelolaan data.
 
 > ⚠️ Fokus aplikasi adalah **mengumpulkan dan mengekspor data yang tersedia secara publik**, bukan melakukan tindakan otomatis seperti follow, DM, atau interaksi akun.
 
@@ -38,9 +38,10 @@
 ## ✨ Fitur
 
 - 🔍 **Pencarian keyword** — Otomatis mencari 60+ keyword terkait mutual/follow di Threads
-- 📸 **Ekstraksi Instagram** — Mengekstrak @username dan tautan instagram.com dari posting
+- ⚡ **Pencarian paralel** — Menggunakan 5 tab browser sekaligus untuk kecepatan maksimal (target 100+ hasil dalam <1 menit)
+- 📸 **Ekstraksi Instagram** — Mengekstrak @username dan **link profil Instagram** (https://instagram.com/username)
 - 📊 **Dashboard Statistik** — Visualisasi hasil pencarian secara real-time
-- 📄 **Export CSV/Excel** — Ekspor hasil dengan format profesional dan styling
+- 📄 **Export CSV/Excel** — Ekspor hasil dengan format profesional dan styling (termasuk link IG)
 - 📝 **Manajemen Keyword** — Tambah, hapus, dan reset keyword melalui menu
 - 🎨 **UI Modern** — Tampilan terminal bergaya Instagram dengan gradient colors
 - 📋 **Logging** — Log harian otomatis untuk debugging dan audit
@@ -58,10 +59,10 @@
 
 ### Langkah Instalasi
 
-1. **Clone atau download proyek**:
+1. **Clone repositori**:
 
    ```bash
-   git clone https://github.com/yourusername/ThreadScout.git
+   git clone https://github.com/R4ZOR404/ThreadScout.git
    cd ThreadScout
    ```
 
@@ -102,7 +103,7 @@ python main.py
 ### Opsi CLI
 
 ```bash
-# Jalankan dengan browser visible (non-headless)
+# Jalankan dengan browser visible (untuk debugging)
 python main.py --no-headless
 
 # Atur jumlah scroll per keyword
@@ -121,8 +122,8 @@ ThreadScout/
 │
 ├── main.py              # Entry point dan menu utama
 ├── config.py            # Konfigurasi, konstanta, tema warna
-├── search.py            # Mesin pencari Threads (Playwright)
-├── extractor.py         # Ekstraksi username/link Instagram
+├── search.py            # Mesin pencari Threads (Playwright, multi-tab paralel)
+├── extractor.py         # Ekstraksi username + link Instagram
 ├── exporter.py          # Export CSV dan Excel
 ├── filters.py           # Filter regex untuk posting
 ├── ui.py                # Komponen UI terminal (Rich)
@@ -133,10 +134,10 @@ ThreadScout/
 │   └── result.xlsx
 │
 ├── logs/                # Log harian
-│   └── 2026-07-17.log
+│   └── 2026-07-18.log
 │
 ├── config/              # Konfigurasi
-│   └── keywords.json    # Daftar keyword
+│   └── keywords.json    # Daftar keyword (60+)
 │
 ├── requirements.txt     # Dependencies
 └── README.md            # Dokumentasi
@@ -148,14 +149,26 @@ ThreadScout/
 
 | No | Menu | Fungsi |
 |----|------|--------|
-| 1 | 🔍 Start Search | Memulai pencarian di Threads berdasarkan keyword |
+| 1 | 🔍 Start Search | Memulai pencarian paralel di Threads (5 tab sekaligus) |
 | 2 | 📝 Edit Keywords | Mengelola daftar kata kunci (tambah/hapus/reset) |
-| 3 | 📊 View Results | Menampilkan tabel hasil pencarian terbaru |
+| 3 | 📊 View Results | Menampilkan tabel hasil dengan link Instagram |
 | 4 | 📄 Export CSV | Mengekspor hasil ke file `output/result.csv` |
 | 5 | 📗 Export Excel | Mengekspor hasil ke file `output/result.xlsx` |
 | 6 | 📈 Statistics | Dashboard statistik pencarian |
 | 7 | ⚙️ Settings | Pengaturan dan informasi aplikasi |
 | 0 | 🚪 Exit | Keluar dari ThreadScout |
+
+---
+
+## ⚡ Performa
+
+ThreadScout menggunakan **pencarian paralel multi-tab** untuk memaksimalkan kecepatan:
+
+- **5 tab browser** berjalan bersamaan menggunakan `asyncio.Semaphore`
+- **Delay minimal** antar pencarian (0.5-1.5 detik)
+- **Scroll cepat** untuk memuat lebih banyak posting
+- **Deduplikasi otomatis** IG username agar hasil tidak duplikat
+- **Target: 100+ Instagram** ditemukan dalam waktu **kurang dari 1 menit**
 
 ---
 
@@ -195,11 +208,21 @@ Edit file `config/keywords.json`:
 | Kolom | Deskripsi |
 |-------|-----------|
 | Threads | Username Threads pembuat posting |
-| Instagram | Username/link Instagram yang ditemukan |
+| Instagram | Username Instagram yang ditemukan (contoh: @rifki.xyz) |
+| Instagram Link | Link profil Instagram lengkap (contoh: https://www.instagram.com/rifki.xyz) |
 | Keyword | Kata kunci yang cocok |
 | Post URL | Link ke posting Threads |
 | Post Content | Isi posting (maks 500 karakter) |
 | Date Scraped | Tanggal dan waktu pengambilan data |
+
+### Contoh Output
+
+| Threads | Instagram | Instagram Link | Keyword |
+|---------|-----------|----------------|---------|
+| @user1 | @rifki.xyz | https://www.instagram.com/rifki.xyz | moots |
+| @user2 | @design.id | https://www.instagram.com/design.id | IG |
+| @user3 | @uiuxdaily | https://www.instagram.com/uiuxdaily | talk |
+| @user4 | Not Found | Not Found | mutual |
 
 ---
 
@@ -215,7 +238,7 @@ playwright install chromium
 ### Timeout saat pencarian
 
 - Periksa koneksi internet
-- Coba kurangi jumlah scroll: `python main.py --scroll 3`
+- Coba kurangi jumlah scroll: `python main.py --scroll 2`
 - Gunakan mode visible untuk debugging: `python main.py --no-headless`
 
 ### CAPTCHA terdeteksi
@@ -228,7 +251,7 @@ playwright install chromium
 
 - Beberapa konten Threads mungkin memerlukan login
 - ThreadScout hanya mengumpulkan data yang tersedia secara publik
-- Posting yang memerlukan login akan dilewati
+- Posting yang memerlukan login akan dilewati otomatis
 
 ### File export gagal
 
@@ -248,14 +271,18 @@ pip install -r requirements.txt
 
 ---
 
-## 📊 Contoh Output
+## 📊 Statistik
 
-| Threads | Instagram | Keyword |
-|---------|-----------|---------|
-| @user1 | @razor | moots |
-| @user2 | @design.id | IG |
-| @user3 | @uiuxdaily | talk |
-| @user4 | Not Found | mutual |
+Dashboard statistik menampilkan:
+
+| Metrik | Deskripsi |
+|--------|-----------|
+| Keyword diproses | Jumlah keyword yang berhasil dicari |
+| Posting diperiksa | Total posting yang diperiksa |
+| Posting lolos filter | Posting yang mengandung referensi IG |
+| Username IG ditemukan | Jumlah unik Instagram yang diekstrak |
+| Waktu proses | Durasi total pencarian |
+| Persentase ekstraksi | Rasio keberhasilan menemukan IG |
 
 ---
 
@@ -264,14 +291,14 @@ pip install -r requirements.txt
 Log disimpan otomatis di folder `logs/` dengan format nama file berdasarkan tanggal:
 
 ```
-logs/2026-07-17.log
+logs/2026-07-18.log
 ```
 
 Isi log mencakup:
 - Startup dan shutdown aplikasi
 - Keyword yang diproses
-- Jumlah posting ditemukan
-- Error dan warning
+- Jumlah posting ditemukan per keyword
+- Error dan warning (CAPTCHA, timeout, dll)
 - Informasi export
 - Runtime dan performa
 

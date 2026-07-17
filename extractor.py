@@ -38,6 +38,24 @@ class ExtractionResult:
         """Return all found references (usernames + links)."""
         return self.usernames + self.links
 
+    @property
+    def instagram_link(self) -> str:
+        """
+        Generate a full Instagram profile URL from the primary username.
+        Returns 'Not Found' if no username was extracted.
+        """
+        if self.usernames:
+            # Strip the @ prefix to build the URL
+            clean_name = self.usernames[0].lstrip("@")
+            return f"https://www.instagram.com/{clean_name}"
+        if self.links:
+            # links are already in "instagram.com/username" format
+            link = self.links[0]
+            if not link.startswith("http"):
+                return f"https://www.{link}"
+            return link
+        return "Not Found"
+
 
 # ─── Compiled Extraction Patterns ───────────────────────────────────────────────
 

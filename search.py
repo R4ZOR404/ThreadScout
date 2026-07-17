@@ -1,14 +1,14 @@
 """
 ThreadScout - Search Module
 =============================
-Playwright-based Threads search engine with async browsing, scrolling,
-and post extraction.
+Playwright-based Threads search engine with concurrent multi-tab browsing,
+scrolling, and post extraction optimized for speed.
 """
 
 import asyncio
 import random
+import time
 from dataclasses import dataclass, field
-from datetime import datetime
 from urllib.parse import quote_plus
 
 from loguru import logger
@@ -33,6 +33,7 @@ from config import (
     BROWSER_HEADLESS,
     BROWSER_TIMEOUT,
     COLORS,
+    CONCURRENT_TABS,
     SCROLL_COUNT,
     SCROLL_DELAY,
     SEARCH_DELAY_MIN,
@@ -56,6 +57,7 @@ class PostData:
     post_content: str = ""
     keyword: str = ""
     instagram: str = "Not Found"
+    instagram_link: str = "Not Found"
     date_scraped: str = ""
 
     def to_dict(self) -> dict:
@@ -63,6 +65,7 @@ class PostData:
         return {
             "Threads": self.threads_username,
             "Instagram": self.instagram,
+            "Instagram Link": self.instagram_link,
             "Keyword": self.keyword,
             "Post URL": self.post_url,
             "Post Content": self.post_content,
@@ -114,8 +117,8 @@ class ThreadsSearcher:
     """
     Async Playwright-based searcher for Threads.net posts.
 
-    Navigates to Threads search, scrolls to load posts, and extracts
-    post content, usernames, and Instagram references.
+    Uses concurrent browser tabs for parallel keyword searches to maximize
+    speed. Targets 100+ Instagram results in under 1 minute.
     """
 
     def __init__(
@@ -123,19 +126,22 @@ class ThreadsSearcher:
         headless: bool = BROWSER_HEADLESS,
         timeout: int = BROWSER_TIMEOUT,
         scroll_count: int = SCROLL_COUNT,
+        max_concurrent: int = CONCURRENT_TABS,
     ) -> None:
         self.headless = headless
         self.timeout = timeout
         self.scroll_count = scroll_count
+        self.max_concurrent = max_concurrent
 
         self._playwright: Playwright | None = None
         self._browser: Browser | None = None
         self._context: BrowserContext | None = None
-        self._page: Page | None = None
 
         self.results: list[PostData] = []
         self.stats = SearchStats()
         self._seen_urls: set[str] = set()
+        self._seen_ig: set[str] = set()
+        self._lock = asyncio.Lock()
 
     async def _launch_browser(self) -> None:
         """Launch Playwright browser with anti-detection settings."""
@@ -149,6 +155,7 @@ class ThreadsSearcher:
                 "--no-sandbox",
                 "--disable-dev-shm-usage",
                 "--disable-gpu",
+                "--disable-images",
             ],
         )
 
@@ -172,16 +179,11 @@ class ThreadsSearcher:
             """
         )
 
-        self._page = await self._context.new_page()
-        self._page.set_default_timeout(self.timeout)
-
         logger.info("Browser launched successfully")
 
     async def _close_browser(self) -> None:
         """Safely close the browser and all resources."""
         try:
-            if self._page:
-                await self._page.close()
             if self._context:
                 await self._context.close()
             if self._browser:
@@ -192,88 +194,58 @@ class ThreadsSearcher:
         except Exception as e:
             logger.warning(f"Error closing browser: {e}")
 
-    async def _scroll_page(self) -> None:
+    async def _scroll_page(self, page: Page) -> None:
         """Scroll the page to load more posts."""
-        if not self._page:
-            return
-
         for i in range(self.scroll_count):
-            await self._page.evaluate("window.scrollBy(0, window.innerHeight)")
-            await asyncio.sleep(SCROLL_DELAY + random.uniform(0.5, 1.5))
-            logger.debug(f"Scroll {i + 1}/{self.scroll_count}")
+            await page.evaluate("window.scrollBy(0, window.innerHeight * 2)")
+            await asyncio.sleep(SCROLL_DELAY + random.uniform(0.2, 0.5))
 
-    async def _check_for_login_wall(self) -> bool:
+    async def _check_for_obstacles(self, page: Page) -> str | None:
         """
-        Check if Threads is showing a login requirement.
+        Check if Threads is showing login wall or CAPTCHA.
 
         Returns:
-            True if login wall is detected, False otherwise.
+            Error message if obstacle detected, None if clear.
         """
-        if not self._page:
-            return False
-
         try:
-            # Check for common login wall indicators
-            login_indicators = [
-                'text="Log in"',
-                'text="Sign up"',
-                '[data-testid="login-button"]',
-                'text="Log in to see more"',
-            ]
-            for selector in login_indicators:
-                element = await self._page.query_selector(selector)
-                if element:
-                    logger.warning("Login wall detected")
-                    return True
-            return False
+            # CAPTCHA check
+            for selector in [
+                "iframe[src*='captcha']", "iframe[src*='recaptcha']",
+                "[class*='captcha']", "iframe[src*='challenge']",
+            ]:
+                if await page.query_selector(selector):
+                    return "CAPTCHA"
+
+            # Login wall check
+            for selector in [
+                'text="Log in"', 'text="Sign up"',
+                '[data-testid="login-button"]', 'text="Log in to see more"',
+            ]:
+                if await page.query_selector(selector):
+                    return "Login required"
+
         except Exception:
-            return False
+            pass
+        return None
 
-    async def _check_for_captcha(self) -> bool:
-        """
-        Check if a CAPTCHA challenge is present.
-
-        Returns:
-            True if CAPTCHA is detected, False otherwise.
-        """
-        if not self._page:
-            return False
-
-        try:
-            captcha_indicators = [
-                "iframe[src*='captcha']",
-                "iframe[src*='recaptcha']",
-                "[class*='captcha']",
-                "iframe[src*='challenge']",
-            ]
-            for selector in captcha_indicators:
-                element = await self._page.query_selector(selector)
-                if element:
-                    logger.warning("CAPTCHA detected")
-                    return True
-            return False
-        except Exception:
-            return False
-
-    async def _extract_posts_from_page(self, keyword: str) -> list[PostData]:
+    async def _extract_posts_from_page(
+        self, page: Page, keyword: str
+    ) -> list[PostData]:
         """
         Extract post data from the current page.
 
         Args:
+            page: Playwright page instance.
             keyword: The keyword used for this search.
 
         Returns:
             List of extracted PostData objects.
         """
-        if not self._page:
-            return []
-
         posts: list[PostData] = []
 
         try:
-            # Wait for content to load
-            await self._page.wait_for_load_state("domcontentloaded")
-            await asyncio.sleep(2)
+            await page.wait_for_load_state("domcontentloaded")
+            await asyncio.sleep(1.5)
 
             # Try multiple selectors for Threads posts
             post_selectors = [
@@ -286,7 +258,7 @@ class ThreadsSearcher:
 
             post_elements = []
             for selector in post_selectors:
-                elements = await self._page.query_selector_all(selector)
+                elements = await page.query_selector_all(selector)
                 if elements:
                     post_elements = elements
                     logger.debug(
@@ -295,18 +267,18 @@ class ThreadsSearcher:
                     break
 
             if not post_elements:
-                # Fallback: try to extract text content from the page
                 logger.debug("No post elements found with known selectors")
                 return posts
 
             for element in post_elements:
                 try:
-                    # Extract text content
                     text_content = await element.inner_text()
                     if not text_content or len(text_content.strip()) < 10:
                         continue
 
-                    self.stats.posts_checked += 1
+                    # Thread-safe stats update
+                    async with self._lock:
+                        self.stats.posts_checked += 1
 
                     # Extract username from post
                     username = ""
@@ -334,25 +306,33 @@ class ThreadsSearcher:
                             else:
                                 post_url = href
 
-                    # Skip if we've already seen this URL
-                    if post_url and post_url in self._seen_urls:
-                        continue
-                    if post_url:
-                        self._seen_urls.add(post_url)
+                    # Skip duplicates (thread-safe)
+                    async with self._lock:
+                        if post_url and post_url in self._seen_urls:
+                            continue
+                        if post_url:
+                            self._seen_urls.add(post_url)
 
                     # Apply content filters
                     filter_result = apply_filters(text_content)
                     if not filter_result.passed:
                         continue
 
-                    self.stats.posts_passed += 1
+                    async with self._lock:
+                        self.stats.posts_passed += 1
 
                     # Extract Instagram references
                     extraction = extract_instagram(text_content)
                     ig_reference = extraction.primary
+                    ig_link = extraction.instagram_link
 
                     if extraction.found:
-                        self.stats.ig_found += 1
+                        # Skip if we already have this IG username
+                        async with self._lock:
+                            if ig_reference.lower() in self._seen_ig:
+                                continue
+                            self._seen_ig.add(ig_reference.lower())
+                            self.stats.ig_found += 1
 
                     post = PostData(
                         threads_username=username or "Unknown",
@@ -360,12 +340,13 @@ class ThreadsSearcher:
                         post_content=text_content.strip()[:500],
                         keyword=keyword,
                         instagram=ig_reference,
+                        instagram_link=ig_link,
                         date_scraped=get_timestamp(),
                     )
 
                     posts.append(post)
                     logger.debug(
-                        f"Extracted post: {username} | IG: {ig_reference}"
+                        f"Extracted: {username} | IG: {ig_reference} | Link: {ig_link}"
                     )
 
                 except Exception as e:
@@ -379,90 +360,108 @@ class ThreadsSearcher:
 
         return posts
 
-    async def search_keyword(self, keyword: str) -> list[PostData]:
+    async def _search_single_keyword(
+        self, keyword: str, semaphore: asyncio.Semaphore, progress=None, task_id=None
+    ) -> list[PostData]:
         """
-        Search Threads for a specific keyword and extract matching posts.
+        Search Threads for a single keyword using its own tab.
 
         Args:
             keyword: The search keyword.
+            semaphore: Semaphore to limit concurrent tabs.
+            progress: Optional Rich progress bar.
+            task_id: Optional progress task ID.
 
         Returns:
             List of PostData objects found for this keyword.
         """
-        if not self._page:
-            return []
-
-        encoded_keyword = quote_plus(keyword)
-        search_url = f"{THREADS_SEARCH_URL}{encoded_keyword}"
-
-        logger.info(f"Searching keyword: '{keyword}'")
-
-        try:
-            # Navigate to search URL
-            response = await self._page.goto(
-                search_url, wait_until="domcontentloaded", timeout=self.timeout
-            )
-
-            if response and response.status >= 400:
-                logger.warning(
-                    f"HTTP {response.status} for keyword '{keyword}'"
-                )
-                self.stats.errors.append(
-                    f"HTTP {response.status}: {keyword}"
-                )
+        async with semaphore:
+            if not self._context:
                 return []
 
-            # Check for obstacles
-            if await self._check_for_captcha():
-                show_warning(f"CAPTCHA terdeteksi saat mencari '{keyword}'")
-                self.stats.errors.append(f"CAPTCHA: {keyword}")
-                return []
+            page: Page | None = None
+            try:
+                # Create a new tab for this keyword
+                page = await self._context.new_page()
+                page.set_default_timeout(self.timeout)
 
-            if await self._check_for_login_wall():
-                show_warning(
-                    f"Login diperlukan untuk melanjutkan pencarian '{keyword}'"
+                encoded_keyword = quote_plus(keyword)
+                search_url = f"{THREADS_SEARCH_URL}{encoded_keyword}"
+
+                logger.info(f"Searching keyword: '{keyword}'")
+
+                # Navigate to search URL
+                response = await page.goto(
+                    search_url, wait_until="domcontentloaded", timeout=self.timeout
                 )
-                self.stats.errors.append(f"Login required: {keyword}")
+
+                if response and response.status >= 400:
+                    logger.warning(f"HTTP {response.status} for keyword '{keyword}'")
+                    async with self._lock:
+                        self.stats.errors.append(f"HTTP {response.status}: {keyword}")
+                    return []
+
+                # Check for obstacles
+                obstacle = await self._check_for_obstacles(page)
+                if obstacle:
+                    logger.warning(f"{obstacle} detected for keyword '{keyword}'")
+                    async with self._lock:
+                        self.stats.errors.append(f"{obstacle}: {keyword}")
+                    return []
+
+                # Wait for initial content load
+                await asyncio.sleep(1.5)
+
+                # Scroll to load more posts
+                await self._scroll_page(page)
+
+                # Extract posts
+                posts = await self._extract_posts_from_page(page, keyword)
+
+                async with self._lock:
+                    self.stats.keywords_processed += 1
+
+                logger.info(f"Keyword '{keyword}': found {len(posts)} matching posts")
+
+                # Update progress
+                if progress and task_id is not None:
+                    progress.advance(task_id)
+
+                # Small delay before releasing the tab slot
+                await asyncio.sleep(random.uniform(SEARCH_DELAY_MIN, SEARCH_DELAY_MAX))
+
+                return posts
+
+            except PlaywrightTimeout:
+                logger.warning(f"Timeout: {keyword}")
+                async with self._lock:
+                    self.stats.errors.append(f"Timeout: {keyword}")
+                if progress and task_id is not None:
+                    progress.advance(task_id)
                 return []
 
-            # Wait for initial content
-            await asyncio.sleep(3)
+            except Exception as e:
+                logger.error(f"Error ({keyword}): {str(e)}")
+                async with self._lock:
+                    self.stats.errors.append(f"Error ({keyword}): {str(e)}")
+                if progress and task_id is not None:
+                    progress.advance(task_id)
+                return []
 
-            # Scroll to load more posts
-            await self._scroll_page()
-
-            # Extract posts
-            posts = await self._extract_posts_from_page(keyword)
-            self.stats.keywords_processed += 1
-
-            logger.info(
-                f"Keyword '{keyword}': found {len(posts)} matching posts"
-            )
-            return posts
-
-        except PlaywrightTimeout:
-            error_msg = f"Timeout: {keyword}"
-            logger.warning(error_msg)
-            self.stats.errors.append(error_msg)
-            show_warning(f"Timeout saat mencari '{keyword}'")
-            return []
-
-        except ConnectionError:
-            error_msg = f"Connection error: {keyword}"
-            logger.error(error_msg)
-            self.stats.errors.append(error_msg)
-            show_error("Koneksi terputus. Periksa internet Anda.")
-            return []
-
-        except Exception as e:
-            error_msg = f"Error ({keyword}): {str(e)}"
-            logger.error(error_msg)
-            self.stats.errors.append(error_msg)
-            return []
+            finally:
+                # Always close the tab
+                if page:
+                    try:
+                        await page.close()
+                    except Exception:
+                        pass
 
     async def run_search(self, keywords: list[str]) -> list[dict]:
         """
-        Execute the full search pipeline across all keywords.
+        Execute the full search pipeline across all keywords concurrently.
+
+        Uses multiple browser tabs in parallel (controlled by semaphore)
+        to maximize throughput and achieve 100+ IG results in under 1 minute.
 
         Args:
             keywords: List of search keywords.
@@ -470,15 +469,15 @@ class ThreadsSearcher:
         Returns:
             List of result dictionaries ready for export.
         """
-        import time
-
         self.results = []
         self.stats = SearchStats()
         self._seen_urls = set()
+        self._seen_ig = set()
         self.stats.start_time = time.time()
 
         console.print()
         show_info(f"Memulai pencarian dengan {len(keywords)} keyword...")
+        show_info(f"Mode: {self.max_concurrent} tab paralel untuk kecepatan maksimal")
         console.print()
 
         try:
@@ -492,10 +491,13 @@ class ThreadsSearcher:
             show_success("Browser berhasil diluncurkan")
             console.print()
 
-            # Search each keyword with progress
+            # Create semaphore for concurrent tab control
+            semaphore = asyncio.Semaphore(self.max_concurrent)
+
+            # Search all keywords concurrently with progress
             with Progress(
                 SpinnerColumn(style=COLORS["pink"]),
-                TextColumn(f"[{COLORS['white']}]Mencari"),
+                TextColumn(f"[{COLORS['white']}]🔍 Mencari"),
                 BarColumn(
                     complete_style=COLORS["purple"],
                     finished_style=COLORS["success"],
@@ -505,28 +507,22 @@ class ThreadsSearcher:
                 TimeElapsedColumn(),
                 console=console,
             ) as progress:
-                task = progress.add_task(
-                    "searching", total=len(keywords)
-                )
+                task_id = progress.add_task("searching", total=len(keywords))
 
-                for i, keyword in enumerate(keywords):
-                    progress.update(
-                        task,
-                        description=f"[{COLORS['white']}]🔍 [{COLORS['orange']}]{keyword}",
-                    )
+                # Launch all keyword searches concurrently
+                tasks = [
+                    self._search_single_keyword(kw, semaphore, progress, task_id)
+                    for kw in keywords
+                ]
 
-                    # Search this keyword
-                    posts = await self.search_keyword(keyword)
-                    self.results.extend(posts)
+                # Gather results from all concurrent searches
+                all_results = await asyncio.gather(*tasks, return_exceptions=True)
 
-                    progress.advance(task)
-
-                    # Polite delay between searches
-                    if i < len(keywords) - 1:
-                        delay = random.uniform(
-                            SEARCH_DELAY_MIN, SEARCH_DELAY_MAX
-                        )
-                        await asyncio.sleep(delay)
+                for result in all_results:
+                    if isinstance(result, list):
+                        self.results.extend(result)
+                    elif isinstance(result, Exception):
+                        logger.error(f"Task exception: {result}")
 
         except Exception as e:
             logger.error(f"Search pipeline error: {e}")
@@ -549,6 +545,10 @@ class ThreadsSearcher:
             f"Ditemukan {len(self.results)} posting dari "
             f"{self.stats.keywords_processed} keyword"
         )
+        show_info(
+            f"🎯 {self.stats.ig_found} Instagram ditemukan "
+            f"dalam {self.stats.duration:.1f} detik"
+        )
 
         if self.stats.errors:
             show_warning(f"{len(self.stats.errors)} error terjadi selama pencarian")
@@ -556,7 +556,8 @@ class ThreadsSearcher:
         logger.info(
             f"Search complete: {len(self.results)} results, "
             f"{self.stats.keywords_processed} keywords, "
-            f"{self.stats.posts_checked} posts checked"
+            f"{self.stats.posts_checked} posts checked, "
+            f"{self.stats.duration:.1f}s elapsed"
         )
 
         return [post.to_dict() for post in self.results]
