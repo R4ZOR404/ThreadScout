@@ -252,7 +252,7 @@ pip install -r requirements.txt
 
 | Threads | Instagram | Keyword |
 |---------|-----------|---------|
-| @user1 | @rifki.xyz | moots |
+| @user1 | @razor | moots |
 | @user2 | @design.id | IG |
 | @user3 | @uiuxdaily | talk |
 | @user4 | Not Found | mutual |
