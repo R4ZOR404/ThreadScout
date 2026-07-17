@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual Environment
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+logs/*.log
+
+# Output files
+output/*.csv
+output/*.xlsx
+
+# Environment
+.env
+.env.local
+
+# OS
+Thumbs.db
+.DS_Store
+desktop.ini
