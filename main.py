@@ -1,8 +1,9 @@
 """
-ThreadScout - Main Entry Point
-================================
-Interactive CLI application for collecting Instagram references from
-publicly accessible Threads posts based on keyword searches.
+ThreadScout - Main Entry Point v2.1
+=====================================
+Professional interactive CLI for collecting Instagram references from
+publicly accessible Threads posts. Features unlimited search with
+graceful Ctrl+C handling that returns to menu instead of crashing.
 
 Usage:
     python main.py          # Start the interactive menu
@@ -10,8 +11,8 @@ Usage:
 """
 
 import asyncio
+import signal
 import sys
-import time
 from pathlib import Path
 
 import typer
@@ -22,6 +23,7 @@ from config import (
     APP_VERSION,
     BROWSER_HEADLESS,
     COLORS,
+    CONCURRENT_TABS,
     KEYWORDS_FILE,
     LOGS_DIR,
     SCROLL_COUNT,
@@ -76,10 +78,8 @@ _search_performed: bool = False
 
 def setup_logging() -> None:
     """Configure Loguru with daily rotating log files."""
-    # Remove default handler
     logger.remove()
 
-    # File handler: daily rotating log
     log_file = LOGS_DIR / get_log_filename()
     logger.add(
         log_file,
@@ -90,64 +90,66 @@ def setup_logging() -> None:
         encoding="utf-8",
     )
 
-    # Minimal stderr handler for critical errors only
+    # Only show CRITICAL errors in terminal (Rich handles the rest)
     logger.add(
         sys.stderr,
         level="CRITICAL",
         format="{message}",
     )
 
-    logger.info(f"{'='*60}")
+    logger.info(f"{'=' * 60}")
     logger.info(f"{APP_NAME} v{APP_VERSION} started")
-    logger.info(f"{'='*60}")
+    logger.info(f"{'=' * 60}")
 
 
 # ─── Menu Handlers ──────────────────────────────────────────────────────────────
 
 
 async def handle_search() -> None:
-    """Handle the Start Search menu option — runs UNLIMITED until Ctrl+C."""
+    """
+    Start unlimited search — runs until Ctrl+C.
+
+    Ctrl+C is caught INSIDE the searcher and returns here gracefully.
+    The main menu loop is never interrupted.
+    """
     global _results, _stats, _search_performed
 
     try:
         keywords = load_keywords(KEYWORDS_FILE)
-    except (FileNotFoundError, Exception) as e:
+    except Exception as e:
         show_error(f"Gagal memuat keywords: {e}")
         return
 
     if not keywords:
-        show_warning("Tidak ada keyword ditemukan. Tambahkan keyword terlebih dahulu.")
+        show_warning("Tidak ada keyword. Tambahkan keyword melalui menu 2.")
         return
 
-    show_info(f"Total {len(keywords)} keyword — pencarian UNLIMITED")
-    show_info("Pencarian akan berjalan terus hingga Anda menekan Ctrl+C")
+    console.print()
+    show_info(f"📋 Total {len(keywords)} keyword tersedia")
+    show_info(f"⚡ Mode: {CONCURRENT_TABS} tab paralel | Pencarian unlimited")
+    show_info(f"📸 Hanya mengumpulkan posting dengan Instagram")
+    show_info(f"⏹️  Tekan Ctrl+C kapan saja untuk berhenti")
     console.print()
 
     if not confirm_action("Mulai pencarian unlimited?"):
         show_info("Pencarian dibatalkan.")
         return
 
-    # Run the unlimited search
+    # The searcher handles Ctrl+C internally — it will NEVER crash here
     searcher = ThreadsSearcher()
-    try:
-        _results = await searcher.run_search(keywords)
-    except KeyboardInterrupt:
-        searcher.stop()
-        _results = [post.to_dict() for post in searcher.results]
-
+    _results = await searcher.run_search(keywords)
     _stats = searcher.stats.to_dict()
     _search_performed = True
 
-    # Log results
-    logger.info(f"Search completed: {len(_results)} results")
+    logger.info(f"Search returned: {len(_results)} results")
 
-    # Show statistics
-    console.print()
-    show_statistics(_stats)
+    # Auto-suggest export if results found
+    if _results:
+        show_info(f"💡 Gunakan menu 4 (CSV) atau 5 (Excel) untuk mengekspor {len(_results)} hasil")
 
 
 def handle_edit_keywords() -> None:
-    """Handle the Edit Keywords menu option."""
+    """Manage keyword list: add, remove, view, reset."""
     try:
         keywords = load_keywords(KEYWORDS_FILE)
     except FileNotFoundError:
@@ -162,7 +164,6 @@ def handle_edit_keywords() -> None:
         ).strip()
 
         if choice == "1":
-            # Add keyword
             new_kw = console.input(
                 f"  [{COLORS['orange']}]▶[/] Masukkan keyword baru: "
             ).strip()
@@ -172,12 +173,11 @@ def handle_edit_keywords() -> None:
                 else:
                     keywords.append(new_kw)
                     save_keywords(KEYWORDS_FILE, keywords)
-                    show_success(f"Keyword '{new_kw}' berhasil ditambahkan.")
+                    show_success(f"Keyword '{new_kw}' ditambahkan. Total: {len(keywords)}")
             else:
                 show_warning("Keyword tidak boleh kosong.")
 
         elif choice == "2":
-            # Remove keyword
             show_keywords_list(keywords)
             idx_input = console.input(
                 f"  [{COLORS['orange']}]▶[/] Nomor keyword yang dihapus: "
@@ -187,22 +187,17 @@ def handle_edit_keywords() -> None:
                 if 0 <= idx < len(keywords):
                     removed = keywords.pop(idx)
                     save_keywords(KEYWORDS_FILE, keywords)
-                    show_success(f"Keyword '{removed}' berhasil dihapus.")
+                    show_success(f"Keyword '{removed}' dihapus. Sisa: {len(keywords)}")
                 else:
                     show_error("Nomor tidak valid.")
             else:
                 show_error("Masukkan nomor yang valid.")
 
         elif choice == "3":
-            # View all
             show_keywords_list(keywords)
 
         elif choice == "4":
-            # Reset to default
             if confirm_action("Reset semua keyword ke default?"):
-                from config import KEYWORDS_FILE as kf
-
-                # Reload original defaults by reading the packaged file
                 default_keywords = [
                     "moots", "mutual", "mutualan", "mutual ig",
                     "mutual instagram", "ig", "IG", "instagram",
@@ -228,39 +223,38 @@ def handle_edit_keywords() -> None:
 
         elif choice == "0":
             break
-
         else:
             show_error("Pilihan tidak valid.")
 
 
 def handle_view_results() -> None:
-    """Handle the View Results menu option."""
+    """Display search results table."""
     if not _results:
-        show_warning("Belum ada hasil pencarian. Jalankan pencarian terlebih dahulu.")
+        show_warning("Belum ada hasil. Jalankan pencarian terlebih dahulu (menu 1).")
         return
     show_results_table(_results)
 
 
 def handle_export_csv() -> None:
-    """Handle the Export CSV menu option."""
+    """Export results to CSV."""
     if not _results:
-        show_warning("Belum ada data untuk diekspor. Jalankan pencarian terlebih dahulu.")
+        show_warning("Belum ada data untuk diekspor.")
         return
     export_csv(_results)
-    logger.info("CSV export completed")
+    logger.info(f"CSV exported: {len(_results)} rows")
 
 
 def handle_export_excel() -> None:
-    """Handle the Export Excel menu option."""
+    """Export results to Excel."""
     if not _results:
-        show_warning("Belum ada data untuk diekspor. Jalankan pencarian terlebih dahulu.")
+        show_warning("Belum ada data untuk diekspor.")
         return
     export_excel(_results)
-    logger.info("Excel export completed")
+    logger.info(f"Excel exported: {len(_results)} rows")
 
 
 def handle_statistics() -> None:
-    """Handle the Statistics menu option."""
+    """Display search statistics dashboard."""
     if not _search_performed:
         show_warning("Belum ada statistik. Jalankan pencarian terlebih dahulu.")
         return
@@ -268,9 +262,10 @@ def handle_statistics() -> None:
 
 
 def handle_settings() -> None:
-    """Handle the Settings menu option."""
+    """Display current application settings."""
     settings = {
         "Browser Mode": "Headless" if BROWSER_HEADLESS else "Visible",
+        "Concurrent Tabs": str(CONCURRENT_TABS),
         "Scroll Count": str(SCROLL_COUNT),
         "Search Delay": f"{SEARCH_DELAY_MIN}-{SEARCH_DELAY_MAX}s",
         "Keywords File": str(KEYWORDS_FILE),
@@ -285,38 +280,59 @@ def handle_settings() -> None:
 
 
 async def main_menu() -> None:
-    """Run the interactive main menu loop."""
+    """
+    Run the interactive main menu loop.
+
+    This loop is designed to survive Ctrl+C during searches.
+    Ctrl+C at the menu prompt simply re-shows the menu.
+    """
     show_banner()
 
     while True:
-        show_menu()
-        choice = prompt_menu_choice()
+        try:
+            show_menu()
+            choice = prompt_menu_choice()
 
-        if choice == "1":
-            await handle_search()
-        elif choice == "2":
-            handle_edit_keywords()
-        elif choice == "3":
-            handle_view_results()
-        elif choice == "4":
-            handle_export_csv()
-        elif choice == "5":
-            handle_export_excel()
-        elif choice == "6":
-            handle_statistics()
-        elif choice == "7":
-            handle_settings()
-        elif choice == "0":
+            if choice == "1":
+                await handle_search()
+            elif choice == "2":
+                handle_edit_keywords()
+            elif choice == "3":
+                handle_view_results()
+            elif choice == "4":
+                handle_export_csv()
+            elif choice == "5":
+                handle_export_excel()
+            elif choice == "6":
+                handle_statistics()
+            elif choice == "7":
+                handle_settings()
+            elif choice == "0":
+                console.print()
+                if confirm_action("Keluar dari ThreadScout?"):
+                    # Auto-export if there are unsaved results
+                    if _results:
+                        show_info(f"💾 Menyimpan {len(_results)} hasil sebelum keluar...")
+                        export_csv(_results)
+                        export_excel(_results)
+
+                    console.print()
+                    show_info("Terima kasih telah menggunakan ThreadScout! 👋")
+                    show_divider()
+                    console.print()
+                    logger.info("ThreadScout exited by user")
+                    break
+            else:
+                show_error("Pilihan tidak valid. Gunakan angka 0-7.")
+
+        except KeyboardInterrupt:
+            # Ctrl+C at menu prompt → just re-show menu
             console.print()
-            if confirm_action("Keluar dari ThreadScout?"):
-                console.print()
-                show_info("Terima kasih telah menggunakan ThreadScout! 👋")
-                show_divider()
-                console.print()
-                logger.info("ThreadScout exited by user")
-                break
-        else:
-            show_error("Pilihan tidak valid. Gunakan angka 0-7.")
+            show_info("💡 Gunakan menu 0 untuk keluar dengan aman.")
+            continue
+        except EOFError:
+            # Handle pipe/redirect end
+            break
 
         console.print()
 
@@ -329,19 +345,20 @@ def run(
     headless: bool = typer.Option(
         True,
         "--headless/--no-headless",
-        help="Run browser in headless mode",
+        help="Run browser in headless mode (default: headless)",
     ),
     scroll: int = typer.Option(
         SCROLL_COUNT,
         "--scroll",
         "-s",
-        help="Number of scroll-downs per keyword",
+        help="Number of page scroll-downs per keyword search",
     ),
 ) -> None:
     """
-    🔍 ThreadScout — Instagram Mutual Research Tool
+    🔍 ThreadScout v2.1 — Instagram Mutual Research Tool (Unlimited Edition)
 
-    Kumpulkan username Instagram dari posting Threads berdasarkan keyword.
+    Kumpulkan username dan link Instagram dari posting Threads.
+    Pencarian berjalan tanpa batas hingga Ctrl+C ditekan.
     """
     import config
 
@@ -353,14 +370,15 @@ def run(
     ensure_directories()
     setup_logging()
 
-    logger.info(f"CLI args: headless={headless}, scroll={scroll}")
+    logger.info(f"CLI: headless={headless}, scroll={scroll}")
 
     try:
         asyncio.run(main_menu())
     except KeyboardInterrupt:
+        # Final fallback — should rarely reach here
         console.print()
-        show_info("ThreadScout dihentikan oleh pengguna.")
-        logger.info("ThreadScout interrupted by user (KeyboardInterrupt)")
+        show_info("ThreadScout dihentikan. Sampai jumpa! 👋")
+        logger.info("ThreadScout interrupted at top level")
     except Exception as e:
         show_error(f"Fatal error: {e}")
         logger.critical(f"Fatal error: {e}", exc_info=True)

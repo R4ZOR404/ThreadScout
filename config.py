@@ -10,7 +10,7 @@ from rich.theme import Theme
 # ─── App Metadata ───────────────────────────────────────────────────────────────
 
 APP_NAME: str = "ThreadScout"
-APP_VERSION: str = "2.0"
+APP_VERSION: str = "2.1"
 APP_TAGLINE: str = "Instagram Mutual Research Tool — Unlimited Edition"
 
 # ─── Directory Paths ────────────────────────────────────────────────────────────
