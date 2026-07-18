@@ -106,7 +106,7 @@ def setup_logging() -> None:
 
 
 async def handle_search() -> None:
-    """Handle the Start Search menu option."""
+    """Handle the Start Search menu option — runs UNLIMITED until Ctrl+C."""
     global _results, _stats, _search_performed
 
     try:
@@ -119,33 +119,29 @@ async def handle_search() -> None:
         show_warning("Tidak ada keyword ditemukan. Tambahkan keyword terlebih dahulu.")
         return
 
-    show_info(f"Total {len(keywords)} keyword akan diproses")
+    show_info(f"Total {len(keywords)} keyword — pencarian UNLIMITED")
+    show_info("Pencarian akan berjalan terus hingga Anda menekan Ctrl+C")
     console.print()
 
-    # Ask if user wants to limit keywords
-    limit_input = console.input(
-        f"  [{COLORS['orange']}]▶[/] Jumlah keyword (Enter = semua, atau angka): "
-    ).strip()
-
-    if limit_input.isdigit():
-        limit = int(limit_input)
-        keywords = keywords[:limit]
-        show_info(f"Dibatasi ke {len(keywords)} keyword pertama")
-
-    if not confirm_action(f"Mulai pencarian dengan {len(keywords)} keyword?"):
+    if not confirm_action("Mulai pencarian unlimited?"):
         show_info("Pencarian dibatalkan.")
         return
 
-    # Run the search
+    # Run the unlimited search
     searcher = ThreadsSearcher()
-    _results = await searcher.run_search(keywords)
+    try:
+        _results = await searcher.run_search(keywords)
+    except KeyboardInterrupt:
+        searcher.stop()
+        _results = [post.to_dict() for post in searcher.results]
+
     _stats = searcher.stats.to_dict()
     _search_performed = True
 
     # Log results
     logger.info(f"Search completed: {len(_results)} results")
 
-    # Show brief statistics
+    # Show statistics
     console.print()
     show_statistics(_stats)
 

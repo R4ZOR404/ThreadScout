@@ -10,8 +10,8 @@ from rich.theme import Theme
 # ─── App Metadata ───────────────────────────────────────────────────────────────
 
 APP_NAME: str = "ThreadScout"
-APP_VERSION: str = "1.1"
-APP_TAGLINE: str = "Instagram Mutual Research Tool"
+APP_VERSION: str = "2.0"
+APP_TAGLINE: str = "Instagram Mutual Research Tool — Unlimited Edition"
 
 # ─── Directory Paths ────────────────────────────────────────────────────────────
 
@@ -77,15 +77,15 @@ GRADIENT_COLORS: list[str] = [
     "#F77737",  # Orange
 ]
 
-# ─── Browser Settings ───────────────────────────────────────────────────────────
+# ─── Browser Settings (Optimized for Maximum Speed) ─────────────────────────────
 
 BROWSER_HEADLESS: bool = True
-BROWSER_TIMEOUT: int = 15000  # milliseconds (reduced for speed)
-SCROLL_COUNT: int = 3  # number of scroll-downs per keyword search
-SCROLL_DELAY: float = 0.8  # seconds between scrolls (reduced for speed)
-SEARCH_DELAY_MIN: float = 0.5  # minimum delay between keyword searches (seconds)
-SEARCH_DELAY_MAX: float = 1.5  # maximum delay between keyword searches (seconds)
-CONCURRENT_TABS: int = 5  # number of browser tabs running in parallel
+BROWSER_TIMEOUT: int = 10000  # milliseconds (aggressive timeout)
+SCROLL_COUNT: int = 5  # number of scroll-downs per keyword search
+SCROLL_DELAY: float = 0.3  # seconds between scrolls (minimal)
+SEARCH_DELAY_MIN: float = 0.2  # minimum delay between keyword searches
+SEARCH_DELAY_MAX: float = 0.5  # maximum delay between keyword searches
+CONCURRENT_TABS: int = 10  # number of browser tabs running in parallel
 
 # ─── Threads URLs ───────────────────────────────────────────────────────────────
 

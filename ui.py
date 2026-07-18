@@ -216,10 +216,12 @@ def show_statistics(stats: dict) -> None:
     stats_table.add_column("Value", style=f"bold {COLORS['orange']}", width=20, justify="right")
 
     items = [
+        ("🔄  Siklus keyword", str(stats.get("cycles_completed", 0))),
         ("🔑  Keyword diproses", str(stats.get("keywords_processed", 0))),
         ("📝  Posting diperiksa", str(stats.get("posts_checked", 0))),
         ("✅  Posting lolos filter", str(stats.get("posts_passed", 0))),
-        ("📸  Username IG ditemukan", str(stats.get("ig_found", 0))),
+        ("📸  Instagram ditemukan", str(stats.get("ig_found", 0))),
+        ("⚡  IG per menit", f"{stats.get('ig_per_minute', 0):.1f}"),
         ("⏱️   Waktu proses", format_duration(stats.get("duration", 0))),
         ("📊  Persentase ekstraksi", f"{stats.get('success_rate', 0):.1f}%"),
     ]
